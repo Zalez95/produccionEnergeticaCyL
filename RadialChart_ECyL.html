@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+	<meta charset="UTF-8">
+	<meta name="description" content="Producción energética en Castilla y León">
+	<meta name="keywords" content="HTML, JavaScript, D3">
+	<meta name="author" content="Daniel González Alonso">
+	<title>Producción energética CyL</title>
+	<script type="text/javascript" src="./resources/d3.min.js"></script>
+</head>
+<body>
+	<script type="text/javascript">
+		/******************* Variables Globales *******************/
+		// Margenes y dimensiones del SVG
+		var margen = {superior: 75, derecho: 50, inferior: 75, izquierdo: 50},
+			ancho = 650 - margen.izquierdo - margen.derecho,
+			alto = 650 - margen.superior - margen.inferior;
+		var radio = Math.min(ancho, alto) / 2,	// Radio exterior del grafico
+			tamIndFechas = 0.03,				// Long del indicador de fechas
+			anchoProvincias = 0.25;
+		// Variables globales:
+		var ArrayFechas = [],		// Fechas posibles.
+			ArrayDatosT = [],		// Datos para un fecha y una provincia.
+			ArrayProvincias = [];	// Provincias posibles.
+		var arcos = [];				// Array de arcos.
+
+		/* Colores para los sectores:
+		 *  - Azul: Renovables
+		 *  - Rojo: No Renovables
+		 */
+		var color = d3.scale.linear()
+			.domain([0, 1])
+			.range(["#EE3B3B", "#66ccff"]);
+
+		// Pie Chart para representar el Radial Chart.
+		var pie = d3.layout.pie()
+			.sort(null)
+			.value(function(d) { return d.tam; });
+
+		// SVG
+		var svg = d3.select("body").append("svg")
+			.attr("width", ancho + margen.izquierdo + margen.derecho)
+			.attr("height", alto + margen.superior + margen.inferior)
+			.append("g")
+			.attr("transform", "translate(" +(ancho / 2 + margen.izquierdo) +
+				"," + (alto / 2 + margen.superior) + ")");
+
+		// Titulo
+		var titulo = d3.select("svg").append("g")
+			.attr("transform", "translate(" +margen.izquierdo+ ", "
+				+margen.superior+ ")")
+			.attr("class", "title");
+		titulo.append("text")
+			.style("font-size", "22px")
+			.append('svg:tspan')
+				.attr('x', 175)
+				.attr('dy', -30)
+				.text("en Castilla y León")
+			.append('svg:tspan')
+				.attr('x', 75)
+				.attr('dy', -25)
+				.text("Energía Renovable vs No Renovable");
+
+		/********************* Funciones *********************/
+		/* Retorna true si "fecha" esta dentro de "ArrayFechas", 
+		 * y false en caso contrario.
+		 */
+		function dentroDeFechas(fecha)
+		{
+ 			return (ArrayFechas.indexOf(fecha) > -1);
+		}
+
+		/* Retorna true si "nombreProvincia" ya esta dentro de 
+		 * "ArrayProvincias", y false en caso contrario.
+		 */
+		function dentroDeProvincias(nombreProvincia)
+		{
+ 			for (var i in ArrayProvincias) {
+ 				if (ArrayProvincias[i].provincia == nombreProvincia) {
+ 					return true;
+ 				}
+ 			}
+ 			return false;
+		}
+
+		/* Retorna el indice de "dato" en el array "ArrayDatosT", en
+		 * caso de no estar en el retorna -1.
+		 */
+		function indiceEnArrayDatos(provincia, fecha)
+		{
+			for (var i = 0; i < ArrayDatosT.length; i++) {
+				if ((ArrayDatosT[i].provincia == provincia) &&
+					(ArrayDatosT[i].fecha == fecha)) {
+					return i;
+				}
+			}
+			return -1;
+		}
+
+		/* Retorna true si el "indicador" es una energia renovable, y false
+		 * en caso contrario.
+		 */
+		function renovable(indicador) {
+			switch(indicador) {
+				case "eólica":
+					return true;
+					break;
+				case "hidráulica":
+					return true;
+					break;
+				case "solar":
+					return true;
+					break;
+				default:
+					return false;
+					break;
+			}
+		}
+
+		/* Introduce los labels con las provincias en los sectores del 
+		 * ultimo arco
+		 */
+		function setLabelProvincias(g) {
+			g.append("text")
+				.attr("transform", function(d) {
+						return "translate(" + 
+							arcos[arcos.length-1].centroid(d) + ")";
+					})
+				.style("text-anchor", "middle")
+				.style("font-family", "sans-serif")
+				.text(function(d) {
+					if ((d.data.provincia != "fecha1") && 
+							(d.data.provincia != "fecha2")) {
+						return d.data.provincia;
+					}
+				});
+		}
+
+		/* Introduce los labels con las fechas en los ultimos sectores de
+		 * cada circunferencia (excepto la de provincias).
+		 */
+		function setLabelFechas(g, i) {
+			g.append("text")
+				.attr("transform", function(d) {
+						return "translate(" + 
+							[ -1.0/(i+1), arcos[i].centroid(d)[1]+4 ]
+							+ ")";
+					})
+				.style("text-anchor", "middle")
+				.style("font-size", (i*0.8 + 8)+"px")
+				.style("fill", "#d3d3d3")
+				.style("font-family", "sans-serif")
+				.text(function(d) {
+					if (d.data.provincia == "fecha2") {
+						return ArrayFechas[i].toString();
+					}
+				});
+		}
+
+		/* Crea la leyenda del gráfico.
+		 */
+		function setLeyenda(g) {
+			var gradiente = d3.select("svg")
+				.append("svg:linearGradient")
+				.attr("id", "gradient")
+				.attr("x1", "0%")
+				.attr("y1", "100%")
+				.attr("x2", "100%")
+				.attr("y2", "100%")
+				.attr("spreadMethod", "pad");
+			// Colores del gradiente
+			gradiente.append("svg:stop")
+				.attr("offset", "0%")
+				.attr("stop-color", "#EE3B3B")
+				.attr("stop-opacity", 1);
+			gradiente.append("svg:stop")
+				.attr("offset", "100%")
+				.attr("stop-color", "#66ccff")
+				.attr("stop-opacity", 1);
+			// Creamos un rectangulo con los colores del gradiente
+			var leyenda = g.append("rect")
+				.attr("class", "rect")
+					.attr("class", "bar")
+					.attr("x", -70)
+					.attr("width", 140)
+					.attr("y", 0)
+					.attr("height", 30)
+					.style('fill', 'url(#gradient)');
+			var ren = g.append("text")
+				.attr("x", 75)
+				.attr("y", -5)
+				.style("font-size", "14px")
+				.style("text-anchor", "middle")
+				.style("font-family", "Arial")
+				.text("Renovable");
+			var noRen = g.append("text")
+				.attr("x", -60)
+				.attr("y", -5)
+				.style("font-size", "14px")
+				.style("text-anchor", "middle")
+				.style("font-family", "Arial")
+				.text("No Renovable");
+		}
+
+		/* Crea los arcos a partir de los datos de ArrayFechas y los introduce
+		 * en el array "arcos".
+		 */
+		function creaCircunferencias()
+		{
+			var ultimoValor = 0.5, sigValor;
+			var arco;
+			for (var i = 0; i < ArrayFechas.length; i++) {
+				sigValor = ultimoValor + 0.5/(ArrayFechas.length);
+				arco = d3.svg.arc()
+					.innerRadius(radio * ultimoValor)
+					.outerRadius(radio * sigValor);
+				ultimoValor = sigValor;
+				arcos.push(arco);	// Introducimo el arco creado en "arcos".
+			}
+			// Arco para los labels de las provincias-
+			arco = d3.svg.arc()
+				.innerRadius(radio * ultimoValor)
+				.outerRadius(radio * (ultimoValor + anchoProvincias));
+			ultimoValor = sigValor;
+			arcos.push(arco);	// Introducimo el arco creado en "arcos".
+		}
+
+		/* Todos los sector de provincias tienen el mismo tamaño, este lo
+		 * calculamos en funcion del numero de elementos en ArrayProvincias
+		 * y lo introducimos en ese mismo array. El tamaño del sector de
+		 * los sectores de las fechas
+		 */
+		function setTamSeccion()
+		{
+			ArrayProvincias.unshift({ provincia: "fecha1", tam: tamIndFechas/2 });
+			var seccion = (1 - tamIndFechas) / (ArrayProvincias.length - 1);
+			for (var i = 1; i < ArrayProvincias.length; i++) {
+				ArrayProvincias[i].tam = seccion;
+			}
+			ArrayProvincias.push({ provincia: "fecha2", tam: tamIndFechas/2 });
+		}
+
+		/* Funcion que se activa cuando el raton esta encima de un sector,
+		 * y que se encarga de poner la opacidad de todos los sectores excepto
+		 * el seleccionado y los sectores con fechas a un valor inferior
+		 * para ajustar el foco de atencion.
+		 */
+		function ratonEncima() {
+			var provincia = d3.select(this).attr("provincia"),
+				sectorTmp = null;
+			var arraySectores = d3.selectAll("path")[0];
+			if ((provincia != "fecha1") && (provincia != "fecha2")) {
+				for (var i = 0; i < arraySectores.length-1; i++) {
+					sectorTmp = d3.select(arraySectores[i]);
+					if ((sectorTmp.attr("provincia") != provincia) &&
+							(sectorTmp.attr("provincia") != "fecha1") &&
+							(sectorTmp.attr("provincia") != "fecha2")) {
+						sectorTmp.style("opacity", "0.5");
+					}
+				}
+			}
+		}
+
+		/* Funcion que se activa cuando el raton deja de estar encima de
+		 * un sector, se encarga de reestablecer la opacidad de todos los
+		 * sectores.
+		 */
+		function ratonFuera() {
+			var arraySectores = d3.selectAll("path")[0];
+			for (var i = 0; i < arraySectores.length-1; i++) {
+				sectorTmp = d3.select(arraySectores[i]);
+				sectorTmp.style("opacity", "1.0");
+			}
+		};
+
+		/********************* Programa Principal *********************/
+		d3.dsv(",", "text/plain; charset=ISO-8859-1")
+				("./resources/Indicadores_medioambientalesCambio2.csv",
+				function(datos)	{
+			datos.forEach(function(d)
+			{
+				// Pasamos la columna "Valor" y "FechaValidez" a enteros.
+				d.Valor = +d.Valor;
+				d.FechaValidez = +d.FechaValidez;
+
+				// Obtenemos todas las Fechas y Provincias distintas.		
+				if (!dentroDeFechas(d.FechaValidez)) {
+					ArrayFechas.push(d.FechaValidez);
+				}
+				if (!dentroDeProvincias(d.Provincia)) {
+					ArrayProvincias.push({ provincia: d.Provincia, tam: -1 });
+				}
+				/* Obtenemos la cantidad de energia Renovable en una
+				 * provincia y una fecha.
+				 */
+				if (renovable(d.Indicador)){
+					var energiaRen = d.Valor;
+				} else {
+					var energiaRen = 0;
+				}
+				// Actualizamos los arrays con los nuevos datos.
+				var indice = indiceEnArrayDatos(d.Provincia, d.FechaValidez,
+					ArrayDatosT);
+				if (indice < 0) {
+					// Creamos un nuevo dato.
+					var datoT = {
+						provincia: d.Provincia,
+						fecha: d.FechaValidez,
+						energia: d.Valor,
+						energiaR: energiaRen
+					}
+					ArrayDatosT.push(datoT);
+				} else {
+					// Ya estaba el dato en el array, actualizamos sus valores.
+					ArrayDatosT[indice].energia += d.Valor;
+					ArrayDatosT[indice].energiaR += energiaRen;
+				}
+			});
+
+			creaCircunferencias();	// Creamos las circunferencias.
+			setTamSeccion();		// Creamos los sectores.
+
+			for (var i in ArrayFechas) {
+				// Mostramos los sectores con sus respectivos colores.
+				g = svg.selectAll(".arcos[i]")
+					.data(pie(ArrayProvincias))
+					.enter().append("g")
+					.attr("class", ".arcos[i]");
+				g.append("path")
+					.attr("d", arcos[i])
+					.attr("provincia", function(d){ return d.data.provincia })
+					.on("mouseover", ratonEncima)	// raton esta encima
+					.on("mouseout", ratonFuera)	// raton deja de estar encima
+					.style("fill", function(d) {
+						if ((d.data.provincia != "fecha1") && 
+								(d.data.provincia != "fecha2")) {
+							var seccion = ArrayDatosT[ indiceEnArrayDatos(
+								d.data.provincia, ArrayFechas[i]) ];
+							return color(seccion.energiaR / seccion.energia);
+						} else {
+							return "#323232";	// Color Fecha
+						}
+					});
+				// Mostramos labels con las Fechas.
+				setLabelFechas(g, i);
+			}
+
+			// Mostramos labels con los nombres de las provincias
+			setLabelProvincias(g);
+			setLeyenda(g);
+		});
+	</script>
+</body>
+</html>
